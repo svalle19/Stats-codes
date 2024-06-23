@@ -1,0 +1,85 @@
+# Load libraries
+library(DAAG)
+library(party)
+library(rpart)
+library(rpart.plot)
+library(mlbench)
+library(caret)
+library(pROC)
+library(tree)
+library(datasets)
+library(MASS)
+library(ggplot2)
+library(readxl)
+library(caTools)
+
+# Set seed for reproducibility
+set.seed(7202022)
+
+# Read the Excel file
+GS_5_23_24 <- read_excel("D:/GS 5.23.24.xlsx")
+# View(GS_5_23_24)
+
+# Remove rows with NA values in the input features or target variable
+GS_5_23_24 <- na.omit(GS_5_23_24)
+
+# Splitting dataset into 4:1 ratio for training data set
+sample_data = sample.split(GS_5_23_24$GS0or1, SplitRatio = 0.75)
+train_data <- subset(GS_5_23_24, sample_data == TRUE)
+test_data <- subset(GS_5_23_24, sample_data == FALSE)
+
+# Convert GS0or1 to a factor for classification
+train_data$GS0or1 <- as.factor(train_data$GS0or1)
+test_data$GS0or1 <- as.factor(test_data$GS0or1)
+
+# Create basic decision tree
+tree <- rpart(GS0or1 ~ phosphoRbS249 + Ncadherin + Ecadherin + Bcatenin, data = train_data)
+rpart.plot(tree)
+summary(tree)
+prp(tree)
+plotcp(tree)
+
+# Optimal cp selection
+printcp(tree)
+cp.select <- function(big.tree) {
+  min.x <- which.min(big.tree$cptable[, 4]) # column 4 is xerror
+  for (i in 1:nrow(big.tree$cptable)) {
+    if (big.tree$cptable[i, 4] < big.tree$cptable[min.x, 4] + big.tree$cptable[min.x, 5]) return(big.tree$cptable[i, 1]) # column 5: xstd, column 1: cp
+  }
+}
+optimal_cp <- cp.select(tree)
+cat("Selected optimal cp: ", optimal_cp, "\n")
+
+# Prune the tree using the selected cp value
+pruned.tree <- prune(tree, cp = 0.11)
+rpart.plot(pruned.tree)
+summary(pruned.tree)
+prp(pruned.tree)
+
+# Prediction
+train_pred_class <- predict(pruned.tree, newdata = train_data, type = "class")
+test_pred_class <- predict(pruned.tree, newdata = test_data, type = "class")
+
+# Confusion Matrix
+conf_matrix <- confusionMatrix(train_pred_class, train_data$GS0or1)
+print(conf_matrix)
+
+# AUC Calculation
+## TRAINING
+train_prob <- predict(pruned.tree, train_data, type = "prob")
+train_roc <- multiclass.roc(train_data$GS0or1, train_prob, type = "prob")
+cat("AUC for training data: ", as.numeric(train_roc$auc), "\n")
+
+## TEST
+test_prob <- predict(pruned.tree, test_data, type = "prob")
+test_roc <- multiclass.roc(test_data$GS0or1, test_prob, type = "prob")
+cat("AUC for test data: ", as.numeric(test_roc$auc), "\n")
+
+
+# Calculate pseudo R-squared for training data
+train_r2 <- calc_pseudo_r2(train_data$GS0or1, train_pred_class)
+cat("Pseudo R-squared for training data: ", train_r2, "\n")
+
+# Calculate pseudo R-squared for test data
+test_r2 <- calc_pseudo_r2(test_data$GS0or1, test_pred_class)
+cat("Pseudo R-squared for test data: ", test_r2, "\n")
