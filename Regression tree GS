@@ -1,0 +1,88 @@
+library(ISLR) # Contains Hitters dataset
+library(rpart) # For fitting decision trees
+library(rpart.plot) # For plotting decision trees
+library(readxl) # For reading Excel files
+library(caTools) # For splitting the data
+
+# Set seed for reproducibility
+set.seed(06192024)
+
+# Read the Excel file
+GS_5_23_24 <- read_excel("D:/GS 5.23.24.xlsx")
+View(GS_5_23_24)
+
+# Splitting dataset into 4:1 ratio for training data set
+sample_data = sample.split(GS_5_23_24$GS0or1, SplitRatio = 0.75)
+train_data <- subset(GS_5_23_24, sample_data == TRUE)
+test_data <- subset(GS_5_23_24, sample_data == FALSE)
+
+# Convert E1or2 to a factor for classification
+train_data$GS0or1 = factor(train_data$GS0or1)
+test_data$GS0or1 = factor(test_data$GS0or1)
+
+# Fit the initial regression tree
+rtree.fit <- rpart(GS0or1 ~ Ncadherin + Ecadherin + Bcatenin + phosphoRbS249, data = train_data,
+                   method = "anova", # For regression tree
+                   control = rpart.control(minsplit = 30, cp = 0.02))
+
+# Display the results and plot cross-validation results
+printcp(rtree.fit)
+rsq.rpart(rtree.fit) # Produces 2 plots
+plotcp(rtree.fit) # Visualize cross-validation results 
+summary(rtree.fit) # Detailed summary of splits
+
+# Function to select the best cp based on minimum xerror
+cp.select <- function(tree) {
+  min_xerror_idx <- which.min(tree$cptable[, "xerror"])
+  best_cp <- tree$cptable[min_xerror_idx, "CP"]
+  return(best_cp)
+}
+
+# Select the best cp value
+best_cp <- cp.select(rtree.fit)
+cat("Best cp value: ", best_cp, "\n")
+
+# Prune the tree using the best cp
+pruned.tree <- prune(rtree.fit, cp = best_cp)
+
+# Plot the pruned tree using prp() in the rpart.plot package 
+prp(pruned.tree, main = "Pruned Regression Tree using Best cp")
+
+# Convert GS0or1 to numeric for correlation calculation
+test_data$GS0or1_numeric <- as.numeric(as.character(test_data$GS0or1))
+
+# Evaluate the original and pruned trees
+cor_original <- cor(predict(rtree.fit, newdata = test_data), test_data$GS0or1_numeric, use = "complete.obs")^2
+cor_pruned <- cor(predict(pruned.tree, newdata = test_data), test_data$GS0or1_numeric, use = "complete.obs")^2
+
+# Print the R-squared values
+cat("R-squared for the original tree: ", cor_original, "\n")
+cat("R-squared for the pruned tree: ", cor_pruned, "\n")
+
+# Fit an optimal tree based on selected parameters (if needed)
+optimal_tree <- rpart(GS0or1 ~ Ncadherin + Bcatenin+ Ecadherin + phosphoRbS249, data = train_data,
+                      method = "anova",
+                      control = list(minsplit = 11, maxdepth = 8, cp = 0.02))
+
+# Predict and calculate RMSE
+pred <- predict(optimal_tree, newdata = test_data)
+
+# Check for NAs in predictions or actual values
+na_pred <- which(is.na(pred))
+na_actual <- which(is.na(test_data$GS0or1_numeric))
+
+if (length(na_pred) > 0) {
+  cat("There are NA values in the predictions at indices: ", na_pred, "\n")
+} 
+if (length(na_actual) > 0) {
+  cat("There are NA values in the actual values at indices: ", na_actual, "\n")
+}
+
+# Remove rows with NA values before calculating RMSE
+valid_indices <- !(is.na(pred) | is.na(test_data$GS0or1_numeric))
+if (sum(valid_indices) > 0) {
+  rmse <- sqrt(mean((pred[valid_indices] - test_data$GS0or1_numeric[valid_indices])^2))
+  cat("RMSE for the optimal tree: ", rmse, "\n")
+} else {
+  cat("No valid data points to calculate RMSE.\n")
+}
